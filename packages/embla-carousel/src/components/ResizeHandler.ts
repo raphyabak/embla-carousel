@@ -1,5 +1,4 @@
 import { AxisType } from './Axis'
-import { EmblaCarouselType } from './EmblaCarousel'
 import { EventHandlerType } from './EventHandler'
 import { NodeHandlerType } from './NodeHandler'
 import { mathAbs, WindowType } from './utils'
@@ -19,12 +18,11 @@ export function ResizeHandler(
 ): ResizeHandlerType {
   const observeNodes = [container, ...slides]
   let resizeObserver: ResizeObserver
+  let windowInstance: WindowType
   let containerSize: number
   let slideSizes: number[] = []
   let destroyed = false
-  let resizeWindow: WindowType
-  let reInitAnimationFrame: number | null = null
-  let reInitScheduled = false
+  let frameId = 0
 
   function readSize(node: HTMLElement): number {
     return axis.getSize(nodeHandler.getRect(node))
@@ -33,39 +31,30 @@ export function ResizeHandler(
   function init(ownerWindow: WindowType): void {
     if (!active) return
 
-    resizeWindow = ownerWindow
+    windowInstance = ownerWindow
     containerSize = readSize(container)
     slideSizes = slides.map(readSize)
-
     resizeObserver = new ownerWindow.ResizeObserver(onResize)
-    ownerWindow.requestAnimationFrame(() => {
+
+    scheduleFrame(() => {
       observeNodes.forEach((node) => resizeObserver.observe(node))
     })
   }
 
   function destroy(): void {
     destroyed = true
+    if (frameId) windowInstance.cancelAnimationFrame(frameId)
+    frameId = 0
     if (resizeObserver) resizeObserver.disconnect()
-    if (reInitAnimationFrame !== null) {
-      resizeWindow.cancelAnimationFrame(reInitAnimationFrame)
-      reInitAnimationFrame = null
-    }
-    reInitScheduled = false
   }
 
-  function scheduleReInit(api: EmblaCarouselType): void {
-    // Defer reInit() instead of calling it synchronously from inside the
-    // ResizeObserver callback, which browsers can report as a ResizeObserver
-    // loop. Multiple resize batches arriving before the frame fires collapse
-    // into a single reInit() call.
-    if (reInitScheduled) return
-    reInitScheduled = true
-
-    reInitAnimationFrame = resizeWindow.requestAnimationFrame(() => {
-      reInitScheduled = false
-      reInitAnimationFrame = null
-      if (!destroyed) api.reInit()
-    })
+  function scheduleFrame(callback: () => void): void {
+    if (!frameId) {
+      frameId = windowInstance.requestAnimationFrame(() => {
+        frameId = 0
+        if (!destroyed) callback()
+      })
+    }
   }
 
   function onResize(entries: ResizeObserverEntry[]): void {
@@ -84,7 +73,7 @@ export function ResizeHandler(
       const diffSize = mathAbs(newSize - lastSize)
 
       if (diffSize >= 0.5) {
-        scheduleReInit(event.api)
+        scheduleFrame(() => event.api.reInit())
         break
       }
     }
